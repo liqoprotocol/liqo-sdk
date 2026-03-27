@@ -1,0 +1,31 @@
+{
+  "name": "@liqo/sdk",
+  "version": "1.0.0",
+  "description": "Official JavaScript/TypeScript SDK for the Liqo liquidity routing API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["liqo", "liquidity", "web3", "stellar", "defi"],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liqoprotocol/liqo-sdk"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0",
+    "ts-jest": "^29.0.0"
+  }
+}
