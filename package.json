@@ -4,7 +4,10 @@
   "description": "Official JavaScript/TypeScript SDK for the Liqo liquidity routing API",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "files": ["dist"],
+  "files": ["dist", "README.md"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",

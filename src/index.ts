@@ -65,7 +65,7 @@ export class LiqoClient {
     options: LiqoClientOptions = {}
   ) {
     this.http = axios.create({
-      baseURL: options.baseUrl ?? 'https://api.liqo.dev/v1',
+      baseURL: options.baseUrl ?? 'https://liqo-platform-production.up.railway.app',
       timeout: options.timeout ?? 30_000,
       headers: {
         Authorization: `Bearer ${apiKey}`,
