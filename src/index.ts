@@ -26,8 +26,12 @@ export interface Transaction {
 export interface ConvertResult {
   transactionId: string;
   status: string;
-  estimated_output: number;
+  paymentUrl?: string;     // present for fiat → crypto conversions
+  estimatedOutput: number;
+  fromAsset: string;
+  toAsset: string;
   fee: number;
+  stellarTxHash?: string;  // present for completed crypto → XLM conversions
 }
 
 export interface PayoutResult {
@@ -87,20 +91,69 @@ export class LiqoClient {
 
   /**
    * Convert one asset to another and send to a recipient wallet.
+   *
+   * - **Fiat → crypto** (NGN/GHS/ZAR/USD/EUR → XLM/USDC): returns `paymentUrl` to
+   *   redirect the payer to Paystack. The conversion executes automatically once
+   *   payment is confirmed via Paystack webhook.
+   * - **Crypto → XLM** (USDC → XLM): executes immediately via the Liqo hot wallet
+   *   and returns `status: "completed"` with a `stellarTxHash`.
+   *
+   * @example Fiat conversion (requires `payerEmail`)
+   * ```typescript
+   * const result = await liqo.convert({
+   *   from: 'NGN', to: 'XLM',
+   *   amount: 1000,
+   *   recipient: 'GXXXXXXX...',
+   *   payerEmail: 'user@example.com',
+   * });
+   * window.location.href = result.paymentUrl!; // redirect to Paystack
+   * ```
+   *
+   * @example Crypto conversion
+   * ```typescript
+   * const result = await liqo.convert({
+   *   from: 'USDC', to: 'XLM',
+   *   amount: 100,
+   *   recipient: 'GXXXXXXX...',
+   * });
+   * console.log(result.stellarTxHash); // on-chain proof
+   * ```
    */
   async convert(params: {
     from: string;
     to: string;
     amount: number;
     recipient: string;
+    payerEmail?: string;              // required for fiat conversions
+    metadata?: Record<string, unknown>;
   }): Promise<ConvertResult> {
-    const response = await this.http.post<ConvertResult>('/convert', {
+    const response = await this.http.post<{
+      transaction_id: string;
+      status: string;
+      payment_url?: string;
+      estimated_output: number;
+      from_asset: string;
+      to_asset: string;
+      fee: number;
+      stellar_tx_hash?: string;
+    }>('/convert', {
       from_asset: params.from,
       to_asset: params.to,
       amount: params.amount,
       recipient_wallet: params.recipient,
+      payer_email: params.payerEmail,
+      metadata: params.metadata,
     });
-    return response.data;
+    return {
+      transactionId: response.data.transaction_id,
+      status: response.data.status,
+      paymentUrl: response.data.payment_url,
+      estimatedOutput: response.data.estimated_output,
+      fromAsset: response.data.from_asset,
+      toAsset: response.data.to_asset,
+      fee: response.data.fee,
+      stellarTxHash: response.data.stellar_tx_hash,
+    };
   }
 
   /**
@@ -144,6 +197,10 @@ export class LiqoClient {
    * window.location.href = tip.paymentUrl;
    * ```
    */
+  /**
+   * Streaming-platform convenience wrapper over `convert()`.
+   * Converts NGN → XLM and returns a Paystack payment URL for the viewer.
+   */
   async initializeTip(params: {
     viewerEmail: string;
     amountNgn: number;
@@ -157,26 +214,21 @@ export class LiqoClient {
     feeNgn: number;
     expiresAt: string;
   }> {
-    const response = await this.http.post<{
-      transaction_id: string;
-      payment_url: string;
-      estimated_xlm: number;
-      amount_ngn: number;
-      fee_ngn: number;
-      expires_at: string;
-    }>('/tip/initialize', {
-      viewer_email: params.viewerEmail,
-      amount_ngn: params.amountNgn,
-      streamer_wallet: params.streamerWallet,
-      stream_id: params.streamId,
+    const result = await this.convert({
+      from: 'NGN',
+      to: 'XLM',
+      amount: params.amountNgn,
+      recipient: params.streamerWallet,
+      payerEmail: params.viewerEmail,
+      metadata: { streamId: params.streamId },
     });
     return {
-      transactionId: response.data.transaction_id,
-      paymentUrl: response.data.payment_url,
-      estimatedXlm: response.data.estimated_xlm,
-      amountNgn: response.data.amount_ngn,
-      feeNgn: response.data.fee_ngn,
-      expiresAt: response.data.expires_at,
+      transactionId: result.transactionId,
+      paymentUrl: result.paymentUrl ?? '',
+      estimatedXlm: result.estimatedOutput,
+      amountNgn: params.amountNgn,
+      feeNgn: result.fee,
+      expiresAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
     };
   }
 
