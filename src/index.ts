@@ -126,6 +126,112 @@ export class LiqoClient {
     const response = await this.http.get<Transaction>(`/transaction/${id}`);
     return response.data;
   }
+
+  // ─── Tip Flow (streaming platform NGN → XLM) ──────────────────────────────
+
+  /**
+   * Initialize a viewer tip. Returns a Paystack payment URL to redirect the viewer to.
+   *
+   * @example
+   * ```typescript
+   * const tip = await liqo.initializeTip({
+   *   viewerEmail: 'viewer@example.com',
+   *   amountNgn: 1000,
+   *   streamerWallet: 'GXXXXXXX...',
+   *   streamId: 'stream_abc123',
+   * });
+   * // Redirect viewer to tip.paymentUrl
+   * window.location.href = tip.paymentUrl;
+   * ```
+   */
+  async initializeTip(params: {
+    viewerEmail: string;
+    amountNgn: number;
+    streamerWallet: string;
+    streamId: string;
+  }): Promise<{
+    transactionId: string;
+    paymentUrl: string;
+    estimatedXlm: number;
+    amountNgn: number;
+    feeNgn: number;
+    expiresAt: string;
+  }> {
+    const response = await this.http.post<{
+      transaction_id: string;
+      payment_url: string;
+      estimated_xlm: number;
+      amount_ngn: number;
+      fee_ngn: number;
+      expires_at: string;
+    }>('/tip/initialize', {
+      viewer_email: params.viewerEmail,
+      amount_ngn: params.amountNgn,
+      streamer_wallet: params.streamerWallet,
+      stream_id: params.streamId,
+    });
+    return {
+      transactionId: response.data.transaction_id,
+      paymentUrl: response.data.payment_url,
+      estimatedXlm: response.data.estimated_xlm,
+      amountNgn: response.data.amount_ngn,
+      feeNgn: response.data.fee_ngn,
+      expiresAt: response.data.expires_at,
+    };
+  }
+
+  /**
+   * Confirm a tip after Paystack payment completes.
+   * Verifies payment and triggers the USDC → XLM swap.
+   */
+  async confirmTip(paystackReference: string): Promise<{
+    transactionId: string;
+    status: string;
+    xlmSent: number;
+    streamerWallet: string;
+    stellarTxHash: string;
+  }> {
+    const response = await this.http.post<{
+      transaction_id: string;
+      status: string;
+      xlm_sent: number;
+      streamer_wallet: string;
+      stellar_tx_hash: string;
+    }>('/tip/confirm', { paystack_reference: paystackReference });
+    return {
+      transactionId: response.data.transaction_id,
+      status: response.data.status,
+      xlmSent: response.data.xlm_sent,
+      streamerWallet: response.data.streamer_wallet,
+      stellarTxHash: response.data.stellar_tx_hash,
+    };
+  }
+
+  /**
+   * Check the status of a tip transaction.
+   */
+  async getTipStatus(transactionId: string): Promise<{
+    transactionId: string;
+    status: string;
+    xlmSent?: number;
+    streamerWallet?: string;
+    stellarTxHash?: string;
+  }> {
+    const response = await this.http.get<{
+      transaction_id: string;
+      status: string;
+      xlm_sent?: number;
+      streamer_wallet?: string;
+      stellar_tx_hash?: string;
+    }>(`/tip/status/${transactionId}`);
+    return {
+      transactionId: response.data.transaction_id,
+      status: response.data.status,
+      xlmSent: response.data.xlm_sent,
+      streamerWallet: response.data.streamer_wallet,
+      stellarTxHash: response.data.stellar_tx_hash,
+    };
+  }
 }
 
 export default LiqoClient;
