@@ -1,76 +1,342 @@
 import axios from 'axios';
-import { LiqoClient } from '../index';
+import crypto from 'crypto';
+import { TransactionStatus, TransactionWebhookEvent, type TransactionWebhookPayload } from '@liqo/contracts';
+import { Liqo, LiqoApiError } from '../index';
 
 jest.mock('axios');
-const mockedAxios = {
-  create: jest.fn().mockReturnValue({
-    get: jest.fn(),
-    post: jest.fn(),
-  }),
+
+const mockHttp = {
+  get: jest.fn(),
+  post: jest.fn(),
 };
-(axios as jest.Mocked<typeof axios>).create = mockedAxios.create;
 
-describe('LiqoClient', () => {
-  let client: LiqoClient;
-  let mockHttp: { get: jest.Mock; post: jest.Mock };
+(axios as jest.Mocked<typeof axios>).create = jest.fn().mockReturnValue(mockHttp as never);
+(axios as jest.Mocked<typeof axios>).isAxiosError = jest.fn(
+  (value: unknown): value is { isAxiosError: true } => Boolean((value as { isAxiosError?: boolean } | undefined)?.isAxiosError)
+) as never;
 
+jest.spyOn(crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
+
+const validWallet = 'GAQ3UK7VQUB4D6TQF7B4W7D4J7VJLF4R7VVVJ3TQJ6Q4QX4Q4X4Q4X4Q';
+
+const createParams = {
+  fromAsset: 'NGN' as const,
+  toAsset: 'USDC' as const,
+  amount: 1500,
+  recipientWallet: validWallet,
+  payerEmail: 'buyer@example.com',
+  targetChain: 'stellar' as const,
+  successUrl: 'https://merchant.example/success',
+  cancelUrl: 'https://merchant.example/cancel',
+};
+
+const publicSession = {
+  token: 'cs_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopq',
+  status: 'active',
+  amount: 1500,
+  currency: 'NGN',
+  destinationAsset: 'USDC',
+  targetChain: 'stellar',
+  expiresAt: '2099-01-01T00:00:00.000Z',
+  successUrl: 'https://merchant.example/success',
+  cancelUrl: 'https://merchant.example/cancel',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+};
+
+describe('Liqo SDK Sprint 7', () => {
   beforeEach(() => {
-    client = new LiqoClient('test_api_key', { baseUrl: 'http://localhost:3000' });
-    mockHttp = mockedAxios.create.mock.results[0]!.value as { get: jest.Mock; post: jest.Mock };
     jest.clearAllMocks();
   });
 
-  describe('getQuote()', () => {
-    it('calls GET /quote with correct params', async () => {
-      const mockQuote = {
-        from_asset: 'USDC', to_asset: 'XLM', input_amount: 100,
-        estimated_output: 1020, routing_path: ['USDC', 'XLM'], fee: 0.35, expires_at: '...',
-      };
-      mockHttp.get.mockResolvedValueOnce({ data: mockQuote });
+  it('uses centralized API client headers', () => {
+    new Liqo('sk_test_123', { timeoutMs: 12_000, retryAttempts: 5 });
 
-      const result = await client.getQuote({ from: 'USDC', to: 'XLM', amount: 100 });
-      expect(result.estimated_output).toBe(1020);
-      expect(mockHttp.get).toHaveBeenCalledWith('/quote', expect.objectContaining({
-        params: { from: 'USDC', to: 'XLM', amount: 100 },
-      }));
+    expect((axios as jest.Mocked<typeof axios>).create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeout: 12_000,
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk_test_123',
+          'X-Liqo-Version': '2',
+          'X-Liqo-SDK': 'js/2.x',
+        }),
+      })
+    );
+  });
+
+  it('creates checkout sessions through liqo.checkout.sessions.create', async () => {
+    mockHttp.post.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          checkoutUrl: 'https://checkout.liqo.dev/pay/cs_123',
+          session: publicSession,
+        },
+      },
+    });
+
+    const liqo = new Liqo('sk_test_123');
+    const result = await liqo.checkout.sessions.create({
+      ...createParams,
+      idempotencyKey: 'idem_123',
+    });
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      '/checkout/sessions',
+      createParams,
+      {
+        headers: {
+          'Idempotency-Key': 'idem_123',
+        },
+      }
+    );
+    expect(result.checkoutUrl).toBe('https://checkout.liqo.dev/pay/cs_123');
+    expect(result.session).toEqual(publicSession);
+  });
+
+  it('retrieves checkout sessions by token', async () => {
+    mockHttp.get.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: publicSession,
+      },
+    });
+
+    const liqo = new Liqo('sk_test_123');
+    const result = await liqo.checkout.sessions.retrieve(publicSession.token);
+
+    expect(mockHttp.get).toHaveBeenCalledWith(`/checkout/sessions/${publicSession.token}`, undefined);
+    expect(result).toEqual(publicSession);
+  });
+
+  it('quotes using canonical camelCase request fields only', async () => {
+    mockHttp.get.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          fromAsset: 'NGN',
+          toAsset: 'USDC',
+          inputAmount: 1500,
+          estimatedOutput: 1,
+          fee: 10,
+          expiresAt: '2099-01-01T00:00:00.000Z',
+        },
+      },
+    });
+
+    const liqo = new Liqo('sk_test_123');
+    const result = await liqo.quote({
+      amount: 1500,
+      fromCurrency: 'NGN',
+      toAsset: 'USDC',
+      targetChain: 'stellar',
+    });
+
+    expect(mockHttp.get).toHaveBeenCalledWith(
+      '/quote?fromAsset=NGN&toAsset=USDC&amount=1500&targetChain=stellar',
+      undefined
+    );
+    expect(mockHttp.post).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      fromCurrency: 'NGN',
+      toAsset: 'USDC',
+      inputAmount: 1500,
     });
   });
 
-  describe('convert()', () => {
-    it('calls POST /convert and returns transaction', async () => {
-      mockHttp.post.mockResolvedValueOnce({
-        data: { transactionId: 'tx-123', status: 'processing', estimated_output: 1020, fee: 0.35 },
-      });
+  it('does not fall back to /convert when quote fails', async () => {
+    mockHttp.get.mockRejectedValueOnce({
+      isAxiosError: true,
+      message: 'Request failed with status code 503',
+      response: {
+        status: 503,
+        data: {
+          success: false,
+          error: {
+            code: 'INTERNAL_ERROR',
+            message: 'quote unavailable',
+          },
+        },
+      },
+    });
 
-      const result = await client.convert({
-        from: 'USDC', to: 'XLM', amount: 100, recipient: 'GTEST',
-      });
-      expect(result.transactionId).toBe('tx-123');
-      expect(mockHttp.post).toHaveBeenCalledWith('/convert', expect.objectContaining({
-        from_asset: 'USDC',
-        to_asset: 'XLM',
-        amount: 100,
-        recipient_wallet: 'GTEST',
-      }));
+    const liqo = new Liqo('sk_test_123');
+    await expect(liqo.quote({
+      amount: 1500,
+      fromCurrency: 'NGN',
+      toAsset: 'USDC',
+    })).rejects.toMatchObject({
+      name: 'LiqoApiError',
+      message: 'Liqo is temporarily unavailable: quote unavailable',
+    });
+    expect(mockHttp.post).not.toHaveBeenCalled();
+  });
+
+  it('pay() wraps checkout.sessions.create()', async () => {
+    mockHttp.post.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          checkoutUrl: 'https://checkout.liqo.dev/pay/cs_123',
+          session: publicSession,
+        },
+      },
+    });
+
+    const liqo = new Liqo('sk_test_123');
+    const result = await liqo.pay({
+      amount: createParams.amount,
+      fromCurrency: createParams.fromAsset,
+      toAsset: createParams.toAsset,
+      toWallet: createParams.recipientWallet,
+      payerEmail: createParams.payerEmail,
+      targetChain: createParams.targetChain,
+      successUrl: createParams.successUrl,
+      cancelUrl: createParams.cancelUrl,
+    });
+
+    expect(mockHttp.post).toHaveBeenCalledWith(
+      '/checkout/sessions',
+      expect.objectContaining({
+        fromAsset: 'NGN',
+        toAsset: 'USDC',
+        recipientWallet: validWallet,
+        payerEmail: 'buyer@example.com',
+      }),
+      expect.any(Object)
+    );
+    expect(result.session.token).toBe(publicSession.token);
+  });
+
+  it('retrieves transactions through liqo.transactions.retrieve', async () => {
+    mockHttp.get.mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          id: 'tx_123',
+          status: 'completed',
+          amount: 1500,
+          destinationAsset: 'USDC',
+          actualOutput: 1490,
+          providerRefs: {
+            finalSettlement: {
+              txHash: 'stellar_hash_1',
+            },
+          },
+        },
+      },
+    });
+
+    const liqo = new Liqo('sk_test_123');
+    const result = await liqo.transactions.retrieve('tx_123');
+
+    expect(mockHttp.get).toHaveBeenCalledWith('/transaction/tx_123', undefined);
+    expect(result).toMatchObject({
+      transactionId: 'tx_123',
+      status: 'completed',
+      amount: 1500,
+      asset: 'USDC',
+      actualOutput: 1490,
+      txHash: 'stellar_hash_1',
     });
   });
 
-  describe('payout()', () => {
-    it('calls POST /payout', async () => {
-      mockHttp.post.mockResolvedValueOnce({ data: { transactionId: 'tx-456', status: 'sent' } });
-      const result = await client.payout({ asset: 'USDC', amount: 50, recipient: 'GTEST' });
-      expect(result.status).toBe('sent');
+  it('verifies signed webhook payloads', () => {
+    const payload = JSON.stringify({
+      event: TransactionWebhookEvent.Completed,
+      data: {
+        transactionId: 'tx_123',
+        status: TransactionStatus.Completed,
+        occurredAt: '2099-01-01T00:00:00.000Z',
+      },
+    } satisfies TransactionWebhookPayload);
+    const secret = 'whsec_test_secret';
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    const signingKey = crypto.createHash('sha256').update(secret).digest('hex');
+    const signature = crypto
+      .createHmac('sha256', signingKey)
+      .update(`${timestamp}.${payload}`)
+      .digest('hex');
+
+    const liqo = new Liqo('sk_test_123', { webhookSecret: secret });
+    const result = liqo.webhooks.verify({
+      payload,
+      headers: {
+        'X-Liqo-Signature': signature,
+        'X-Liqo-Timestamp': timestamp,
+      },
     });
+
+    expect(result.valid).toBe(true);
+    expect(result.event.event).toBe('transaction.completed');
+    expect(result.event.data.transactionId).toBe('tx_123');
+    expect(result.event.data.occurredAt).toBe('2099-01-01T00:00:00.000Z');
   });
 
-  describe('getTransaction()', () => {
-    it('calls GET /transaction/:id', async () => {
-      mockHttp.get.mockResolvedValueOnce({
-        data: { id: 'tx-789', status: 'completed', sourceAsset: 'USDC', destinationAsset: 'XLM', amount: 100, estimatedOutput: 1020, fee: 0.35, createdAt: '', updatedAt: '' },
-      });
-      const tx = await client.getTransaction('tx-789');
-      expect(tx.id).toBe('tx-789');
-      expect(tx.status).toBe('completed');
+  it('rejects invalid webhook signatures', () => {
+    const liqo = new Liqo('sk_test_123', { webhookSecret: 'whsec_test_secret' });
+
+    expect(() => liqo.webhooks.verify({
+      payload: '{"ok":true}',
+      headers: {
+        'X-Liqo-Signature': 'bad-signature',
+        'X-Liqo-Timestamp': Math.floor(Date.now() / 1000).toString(),
+      },
+    })).toThrow('Invalid webhook signature');
+  });
+
+  it('throws for deprecated verifyWebhook(signature, payload)', () => {
+    const liqo = new Liqo('sk_test_123', { webhookSecret: 'whsec_test_secret' });
+
+    expect(() => liqo.verifyWebhook('signature', '{}')).toThrow(
+      'verifyWebhook(signature, payload) is deprecated'
+    );
+  });
+
+  it('rejects invalid wallet and targetChain combinations client-side', async () => {
+    const liqo = new Liqo('sk_test_123');
+
+    await expect(liqo.pay({
+      amount: createParams.amount,
+      fromCurrency: createParams.fromAsset,
+      toAsset: createParams.toAsset,
+      toWallet: validWallet,
+      payerEmail: createParams.payerEmail,
+      successUrl: createParams.successUrl,
+      cancelUrl: createParams.cancelUrl,
+      targetChain: 'ethereum',
+    })).rejects.toMatchObject({
+      message: 'toWallet must be a valid Ethereum wallet for targetChain ethereum',
+    });
+
+    expect(mockHttp.post).not.toHaveBeenCalled();
+  });
+
+  it('converts backend error envelopes into LiqoApiError', async () => {
+    mockHttp.post.mockRejectedValueOnce({
+      isAxiosError: true,
+      message: 'Request failed with status code 400',
+      response: {
+        status: 400,
+        data: {
+          success: false,
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'recipientWallet is required',
+            requestId: 'req_123',
+          },
+        },
+      },
+    });
+
+    const liqo = new Liqo('sk_test_123');
+
+    await expect(liqo.checkout.sessions.create(createParams)).rejects.toMatchObject<LiqoApiError>({
+      name: 'LiqoApiError',
+      message: 'recipientWallet is required',
+      statusCode: 400,
+      code: 'VALIDATION_ERROR',
+      requestId: 'req_123',
     });
   });
 });
