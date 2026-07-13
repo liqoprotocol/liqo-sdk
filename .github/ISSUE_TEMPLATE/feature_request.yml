@@ -1,0 +1,36 @@
+name: 💡 Feature Request
+description: Suggest an improvement to @liqo/sdk
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The SDK mirrors the Liqo platform contract. If you're requesting support for an API capability, please note the corresponding platform endpoint if you know it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: What are you trying to do, and what's missing?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API
+      description: What would the ideal SDK method/signature look like?
+      render: ts
+    validations:
+      required: true
+  - type: input
+    id: platform-endpoint
+    attributes:
+      label: Related platform endpoint (if known)
+      placeholder: "POST /checkout/sessions"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

@@ -1,7 +1,7 @@
 {
   "name": "@liqo/sdk",
   "version": "2.0.0",
-  "description": "Official JavaScript/TypeScript SDK for the Liqo liquidity routing API",
+  "description": "Official TypeScript & JavaScript SDK for Liqo — Global Payments Infrastructure for Modern Businesses. Accept payments in any currency and settle in the asset you want through a single API.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -35,12 +35,21 @@
   },
   "keywords": [
     "liqo",
-    "liquidity",
-    "web3",
+    "payments",
+    "payments-api",
+    "payment-infrastructure",
+    "fintech",
+    "checkout",
     "stellar",
-    "defi"
+    "stablecoins",
+    "sdk",
+    "typescript"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/liqoprotocol/liqo-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/liqoprotocol/liqo-sdk/issues"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/liqoprotocol/liqo-sdk"
